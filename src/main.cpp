@@ -2,13 +2,14 @@
 #include <iostream>
 #include <chrono>
 #include <string>
-#include <queue>
+#include <stack>
 
 #define SEND_TYPE_INIT_TAG 0
 #define SEND_QT_NUMBERS_EXPECTED_TAG 1
 #define SEND_INIT_NUM_TAG 2
 #define SEND_QT_PROC_WITH_NUMBERS 3
-#define SEND_NUMBER_TO_PAIR_PROCCESS 4
+#define SEND_NUMBER_AMOUNT_TO_PAIR_PROCCESS 4
+#define SEND_NUMBER_TO_SUM_TO_PAIR_PROCCESS 5
 
 /**
  * @brief  Get the type of output via users input. "sum" (0) or "time" (1) and send it to all proccesses
@@ -146,7 +147,7 @@ int getNumbersExpectedCount(int my_rank, int comm_sz, int& totalNumbers, int* qt
  * @param qtNumbersProccesses in 
  * @param numbersExpected in
  */
-void getMyNumbers(int my_rank, int comm_sz, int& totalNumbers, std::queue<float>& my_numbers, int* qtNumbersProccesses, int numbersExpected){
+void getMyNumbers(int my_rank, int comm_sz, int& totalNumbers, std::stack<float>& my_numbers, int* qtNumbersProccesses, int numbersExpected){
     
     if(my_rank == 0){
         //Block Partition
@@ -200,7 +201,7 @@ void getMyNumbers(int my_rank, int comm_sz, int& totalNumbers, std::queue<float>
  * @param my_numbers out
  * @param qtProccessWithNumbers out 
  */
-void getAllInputs(int my_rank, int comm_sz, int& type, int& totalNumbers, std::queue<float>& my_numbers, int& qtProccessWithNumbers){
+void getAllInputs(int my_rank, int comm_sz, int& type, int& totalNumbers, std::stack<float>& my_numbers, int& qtProccessWithNumbers){
     
     //if there are more proccesses than numbers
     getType(my_rank, comm_sz, type);
@@ -257,14 +258,81 @@ int getMyPairProccessRank(const int world_rank){
 int getQtNumbersPairProccess(const int world_rank, const int pairProccessRank, int myQtNumbers){
     int qtNumbersPair = 0;
     if(world_rank % 2 == 0){
-        MPI_Recv(&qtNumbersPair, 1, MPI_INT, pairProccessRank, SEND_NUMBER_TO_PAIR_PROCCESS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        MPI_Send(&myQtNumbers, 1, MPI_INT, pairProccessRank, SEND_NUMBER_TO_PAIR_PROCCESS, MPI_COMM_WORLD);
+        MPI_Recv(&qtNumbersPair, 1, MPI_INT, pairProccessRank, SEND_NUMBER_AMOUNT_TO_PAIR_PROCCESS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Send(&myQtNumbers, 1, MPI_INT, pairProccessRank, SEND_NUMBER_AMOUNT_TO_PAIR_PROCCESS, MPI_COMM_WORLD);
     }else{
-        MPI_Send(&myQtNumbers, 1, MPI_INT, pairProccessRank, SEND_NUMBER_TO_PAIR_PROCCESS, MPI_COMM_WORLD);
-        MPI_Recv(&qtNumbersPair, 1, MPI_INT, pairProccessRank, SEND_NUMBER_TO_PAIR_PROCCESS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Send(&myQtNumbers, 1, MPI_INT, pairProccessRank, SEND_NUMBER_AMOUNT_TO_PAIR_PROCCESS, MPI_COMM_WORLD);
+        MPI_Recv(&qtNumbersPair, 1, MPI_INT, pairProccessRank, SEND_NUMBER_AMOUNT_TO_PAIR_PROCCESS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
     }
     return qtNumbersPair;
 }
+
+
+void sumUntilItCan(const int world_rank, const int pairProccessRank, int qtNumbersPair, std::stack<float>& my_numbers){
+    bool stillHaveNumbersToSend = my_numbers.size() != 1;
+    bool stillHaveNumbersToReceive = qtNumbersPair != 1;
+
+    while(stillHaveNumbersToReceive || stillHaveNumbersToSend){
+        
+        float numberToSend = 0;
+        if(stillHaveNumbersToSend){
+            //std::cout<<"Proccess "<<world_rank<<" still has numbers to send to"<<pairProccessRank<<std::endl;
+            numberToSend = my_numbers.top();
+            my_numbers.pop();
+        }
+
+        //First part of communication
+        if(world_rank % 2 == 0){
+            if(stillHaveNumbersToReceive){
+                float numberReceived = 0;
+                //std::cout<<"Proccess "<<world_rank<<" waiting for number from Proccess "<<pairProccessRank<<std::endl;
+                MPI_Recv(&numberReceived, 1, MPI_FLOAT, pairProccessRank, SEND_NUMBER_TO_SUM_TO_PAIR_PROCCESS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                qtNumbersPair--;
+                //std::cout<<"Proccess "<<world_rank<<" received number!\n";
+                float numberToSumWith = my_numbers.top();
+                my_numbers.pop();
+                my_numbers.push(numberToSumWith + numberReceived);
+            }else{
+                //std::cout<<"Proccess "<<world_rank<<" has already received all it's numbers from "<<pairProccessRank<<std::endl;
+            }
+        }else{
+            if(stillHaveNumbersToSend){
+                //std::cout<<"Proccess "<<world_rank<<" sending number to Proccess "<<pairProccessRank<<std::endl;
+                MPI_Send(&numberToSend, 1, MPI_INT, pairProccessRank, SEND_NUMBER_TO_SUM_TO_PAIR_PROCCESS, MPI_COMM_WORLD);
+            }else{
+                //std::cout<<"Proccess "<<world_rank<<" has already sent all it's numbers from"<<pairProccessRank<<std::endl;
+            }
+        }
+        
+        //Second part of communication
+        if(world_rank % 2 == 0){
+            if(stillHaveNumbersToSend){
+                //std::cout<<"Proccess "<<world_rank<<" sending number to Proccess "<<pairProccessRank<<std::endl;
+                MPI_Send(&numberToSend, 1, MPI_INT, pairProccessRank, SEND_NUMBER_TO_SUM_TO_PAIR_PROCCESS, MPI_COMM_WORLD);
+            }else{
+                //std::cout<<"Proccess "<<world_rank<<" has already sent all it's numbers from"<<pairProccessRank<<std::endl;
+            }
+        }else{
+            if(stillHaveNumbersToReceive){
+                float numberReceived = 0;
+                //std::cout<<"Proccess "<<world_rank<<" waiting for number from Proccess "<<pairProccessRank<<std::endl;
+                MPI_Recv(&numberReceived, 1, MPI_FLOAT, pairProccessRank, SEND_NUMBER_TO_SUM_TO_PAIR_PROCCESS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                qtNumbersPair--;
+                //std::cout<<"Proccess "<<world_rank<<" received number!\n";
+                float numberToSumWith = my_numbers.top();
+                my_numbers.pop();
+                my_numbers.push(numberToSumWith + numberReceived);
+            }else{
+                //std::cout<<"Proccess "<<world_rank<<" has already received all it's numbers from "<<pairProccessRank<<std::endl;
+            }
+        }
+
+        stillHaveNumbersToSend = my_numbers.size() != 1;
+        stillHaveNumbersToReceive = qtNumbersPair != 1;
+    }
+    
+}
+
 
 int main(int argc, char** argv){
 
@@ -278,7 +346,7 @@ int main(int argc, char** argv){
     int world_rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
 
-    std::queue<float> my_numbers;
+    std::stack<float> my_numbers;
     int type = 0;
     int totalNumbers = 0;
     int qtProccessWithNumbers = 0;
@@ -301,6 +369,13 @@ int main(int argc, char** argv){
 
             qtNumbersPair = getQtNumbersPairProccess(world_rank, pairProccessRank, myQtNumbers);
 
+            sumUntilItCan(world_rank, pairProccessRank, qtNumbersPair, my_numbers);
+
+            std::cout<<"Proccess "<<world_rank<<" has "<<my_numbers.size()<<" numbers in its stack!\n";
+
+            if(my_numbers.size() == 1){
+                std::cout<<"Proccess "<<world_rank<<" has "<<my_numbers.top()<<" in its stack!\n";
+            }
             //until both have only one number
             if(world_rank % 2 == 0){
                 //recv
@@ -315,6 +390,8 @@ int main(int argc, char** argv){
 
         }
     }
+
+    //Reduction phase
 
     MPI_Finalize();
 
