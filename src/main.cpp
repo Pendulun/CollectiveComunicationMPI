@@ -8,9 +8,14 @@
 #define SEND_QT_NUMBERS_EXPECTED_TAG 1
 #define SEND_INIT_NUM_TAG 2
 
+/**
+ * @brief  Get the type of output via users input. "sum" (0) or "time" (1) and send it to all proccesses
+ * 
+ * @param my_rank in
+ * @param comm_sz in
+ * @param type out
+ */
 void getType(int my_rank, int comm_sz, int& type){
-    //Get the type of output
-    //sum (0) or time (1) and send it to all proccesses
     if(my_rank == 0){
         std::string typeRead;
         std::cin>>typeRead;
@@ -32,10 +37,19 @@ void getType(int my_rank, int comm_sz, int& type){
     }
 }
 
-int getNumbersExpectedCount(int my_rank, int comm_sz, int& totalNumbers, int* qtNumbersProccesses){
-    //Get the quantity of numbers from the user
-    //and calculates how many numbers each proccess will get
-    //via block partitioning and send it to each proccess
+
+/**
+ * @brief  Get the quantity of numbers from the user and calculates how many numbers each proccess
+ *  will get via block partitioning and send it to each proccess
+ * 
+ * @param my_rank in
+ * @param comm_sz in
+ * @param totalNumbers in 
+ * @param qtNumbersProccesses out
+ * @param qtProccessWithNumbers out
+ * @return int 
+ */
+int getNumbersExpectedCount(int my_rank, int comm_sz, int& totalNumbers, int* qtNumbersProccesses, int& qtProccessWithNumbers){
     int numbersExpectedCount;
     if(my_rank == 0){
 
@@ -44,6 +58,8 @@ int getNumbersExpectedCount(int my_rank, int comm_sz, int& totalNumbers, int* qt
                         
         //There are more proccesses than numbers
         if(totalNumbers < comm_sz){
+            qtProccessWithNumbers = totalNumbers;
+
             std::cout<<" There are more proccesses than numbers!\n";
                             
             //Set each proccess with one number until it reaches the necessary amount.
@@ -59,6 +75,8 @@ int getNumbersExpectedCount(int my_rank, int comm_sz, int& totalNumbers, int* qt
             }
 
         }else{//There are more numbers than proccesses
+            qtProccessWithNumbers = comm_sz;
+
             int minimunNumbersPerProccess = (int) totalNumbers/comm_sz;
             std::cout<<"Numbers per Proccess: "<<minimunNumbersPerProccess<<std::endl;
             
@@ -105,8 +123,19 @@ int getNumbersExpectedCount(int my_rank, int comm_sz, int& totalNumbers, int* qt
     return numbersExpectedCount;
 }
 
+/**
+ * @brief Fill the proccess's queue with the amount of numbers expected via block partitioning
+ * while reading the user's input 
+ * 
+ * @param my_rank in
+ * @param comm_sz in
+ * @param totalNumbers in 
+ * @param my_numbers out
+ * @param qtNumbersProccesses in 
+ * @param numbersExpected in
+ */
 void getMyNumbers(int my_rank, int comm_sz, int& totalNumbers, std::queue<float>& my_numbers, int* qtNumbersProccesses, int numbersExpected){
-    //Fill the proccess's queue with the amount of numbers expected via block partitioning 
+    
     if(my_rank == 0){
         //Block Partition
         int processToSendRank = 0;
@@ -148,13 +177,25 @@ void getMyNumbers(int my_rank, int comm_sz, int& totalNumbers, std::queue<float>
     }
 }
 
-void getAllInputs(int my_rank, int comm_sz, int& type, int& totalNumbers, std::queue<float>& my_numbers){
-    //Gets all inputs from the user and do block partitioning of numbers
-    //Each proccess will have it's own numbers in the queue. A proccess may not be assigned any number
+/**
+ * @brief 
+ * Gets all inputs from the user and do block partitioning of numbers.
+ * Each proccess will have it's own numbers in the queue. A proccess may not be assigned any number
+ * if the amount of numbers is higher than proccesses
+ * 
+ * @param my_rank in
+ * @param comm_sz in
+ * @param type out
+ * @param totalNumbers out 
+ * @param my_numbers out
+ * @param qtProccessWithNumbers out 
+ */
+void getAllInputs(int my_rank, int comm_sz, int& type, int& totalNumbers, std::queue<float>& my_numbers, int& qtProccessWithNumbers){
+    
     //if there are more proccesses than numbers
     getType(my_rank, comm_sz, type);
     int qtNumbersProccesses[comm_sz];
-    int amountNumbersExpected = getNumbersExpectedCount(my_rank, comm_sz, totalNumbers, qtNumbersProccesses);
+    int amountNumbersExpected = getNumbersExpectedCount(my_rank, comm_sz, totalNumbers, qtNumbersProccesses, qtProccessWithNumbers);
     getMyNumbers(my_rank, comm_sz, totalNumbers, my_numbers, qtNumbersProccesses, amountNumbersExpected);
 }
 
@@ -170,13 +211,14 @@ int main(int argc, char** argv){
     int world_rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
 
-   std::queue<float> my_numbers;
-   int type = 0;
-   int totalNumbers = 0;
+    std::queue<float> my_numbers;
+    int type = 0;
+    int totalNumbers = 0;
+    int qtProccessWithNumbers = 0;
 
-   getAllInputs(world_rank, world_size, type, totalNumbers, my_numbers);
+    getAllInputs(world_rank, world_size, type, totalNumbers, my_numbers, qtProccessWithNumbers);
 
-   std::cout<<"Proccess "<<world_rank<<" has "<<my_numbers.size()<<" numbers in total!\n";
+    std::cout<<"Proccess "<<world_rank<<" has "<<my_numbers.size()<<" numbers in total!\n";
 
     MPI_Finalize();
 
