@@ -8,6 +8,7 @@
 #define SEND_QT_NUMBERS_EXPECTED_TAG 1
 #define SEND_INIT_NUM_TAG 2
 #define SEND_QT_PROC_WITH_NUMBERS 3
+#define SEND_NUMBER_TO_PAIR_PROCCESS 4
 
 /**
  * @brief  Get the type of output via users input. "sum" (0) or "time" (1) and send it to all proccesses
@@ -165,8 +166,6 @@ void getMyNumbers(int my_rank, int comm_sz, int& totalNumbers, std::queue<float>
                 numbersSentForProccessCount = 0;
             }
 
-            std::cout<<"Sending "<<numberRead<<" to proccess "<<processToSendRank<<std::endl;
-
             //If its proccess 0, just push it to its queue
             if(processToSendRank == 0){
                 my_numbers.push(numberRead);
@@ -229,6 +228,44 @@ bool willHaveAPairProccess(const int my_rank, const int comm_sz, const int numbe
 
 }
 
+/**
+ * @brief Get the Pair Proccess Rank. If my proccess rank is odd, its the even rank right below.
+ * If my proccess rank is even, its the odd rank right above
+ * 
+ * @param world_rank My rank
+ * @return int 
+ */
+int getMyPairProccessRank(const int world_rank){
+    if(world_rank % 2 == 0){
+        //My pair proccess its the next rank
+        return world_rank + 1;
+    }else{
+        //My pair proccess its the previous rank
+        return world_rank - 1;
+    }
+}
+
+/**
+ * @brief Get how many numbers my pair proccess has as my proccess send my amount of numbers as well
+ * 
+ * 
+ * @param world_rank My proccess rank
+ * @param pairProccessRank My pair proccess rank
+ * @param myQtNumbers How many numbers my proccess has
+ * @return int How many numbers my pair proccess has
+ */
+int getQtNumbersPairProccess(const int world_rank, const int pairProccessRank, int myQtNumbers){
+    int qtNumbersPair = 0;
+    if(world_rank % 2 == 0){
+        MPI_Recv(&qtNumbersPair, 1, MPI_INT, pairProccessRank, SEND_NUMBER_TO_PAIR_PROCCESS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Send(&myQtNumbers, 1, MPI_INT, pairProccessRank, SEND_NUMBER_TO_PAIR_PROCCESS, MPI_COMM_WORLD);
+    }else{
+        MPI_Send(&myQtNumbers, 1, MPI_INT, pairProccessRank, SEND_NUMBER_TO_PAIR_PROCCESS, MPI_COMM_WORLD);
+        MPI_Recv(&qtNumbersPair, 1, MPI_INT, pairProccessRank, SEND_NUMBER_TO_PAIR_PROCCESS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    }
+    return qtNumbersPair;
+}
+
 int main(int argc, char** argv){
 
     auto initTime = std::chrono::high_resolution_clock::now();
@@ -253,29 +290,16 @@ int main(int argc, char** argv){
 
         //Se for possível formar um par com ele
         if(willHaveAPairProccess(world_rank, world_size, qtProccessWithNumbers)){
-            int pairProccessRank = 0;
-            //Dado o seu rank, se comunicar com o seu par
-            //define o rank do seu par
-            if(world_rank % 2 == 0){
-                //My pair proccess its the next rank
-                pairProccessRank = world_rank + 1;
-            }else{
-                //My pair proccess its the previous rank
-                pairProccessRank = world_rank - 1;
-            }
+            int pairProccessRank = getMyPairProccessRank(world_rank);
 
             std::cout<<"Pair assigned: "<<world_rank<<" -- "<<pairProccessRank<<"\n";
 
             //O número par espera primeiro e o ímpar envia primeiro. Depois o contrário
+            
+            int qtNumbersPair = 0;
+            int myQtNumbers = my_numbers.size();
 
-            //Descobre quantos números tem o seu par
-            if(world_rank % 2 == 0){
-                //recv
-                //send
-            }else{
-                //send
-                //recv
-            }
+            qtNumbersPair = getQtNumbersPairProccess(world_rank, pairProccessRank, myQtNumbers);
 
             //until both have only one number
             if(world_rank % 2 == 0){
