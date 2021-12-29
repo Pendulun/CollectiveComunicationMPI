@@ -267,6 +267,19 @@ int getQtNumbersPairProccess(const int world_rank, const int pairProccessRank, i
     return qtNumbersPair;
 }
 
+/**
+ * @brief Wait for pairProccessRank to send a number. When it gets it, sum it with a number in the stack and push it
+ * 
+ * @param pairProccessRank in 
+ * @param my_numbers in
+ */
+void receiveNumberAndPush(const int pairProccessRank, std::stack<float>& my_numbers){
+    float numberReceived = 0;
+    MPI_Recv(&numberReceived, 1, MPI_FLOAT, pairProccessRank, SEND_NUMBER_TO_SUM_TO_PAIR_PROCCESS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    float numberToSumWith = my_numbers.top();
+    my_numbers.pop();
+    my_numbers.push(numberToSumWith + numberReceived);
+}
 
 void sumUntilItCan(const int world_rank, const int pairProccessRank, int qtNumbersPair, std::stack<float>& my_numbers){
     bool stillHaveNumbersToSend = my_numbers.size() != 1;
@@ -284,14 +297,8 @@ void sumUntilItCan(const int world_rank, const int pairProccessRank, int qtNumbe
         //First part of communication
         if(world_rank % 2 == 0){
             if(stillHaveNumbersToReceive){
-                float numberReceived = 0;
-                //std::cout<<"Proccess "<<world_rank<<" waiting for number from Proccess "<<pairProccessRank<<std::endl;
-                MPI_Recv(&numberReceived, 1, MPI_FLOAT, pairProccessRank, SEND_NUMBER_TO_SUM_TO_PAIR_PROCCESS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                receiveNumberAndPush(pairProccessRank, my_numbers);
                 qtNumbersPair--;
-                //std::cout<<"Proccess "<<world_rank<<" received number!\n";
-                float numberToSumWith = my_numbers.top();
-                my_numbers.pop();
-                my_numbers.push(numberToSumWith + numberReceived);
             }else{
                 //std::cout<<"Proccess "<<world_rank<<" has already received all it's numbers from "<<pairProccessRank<<std::endl;
             }
@@ -314,14 +321,8 @@ void sumUntilItCan(const int world_rank, const int pairProccessRank, int qtNumbe
             }
         }else{
             if(stillHaveNumbersToReceive){
-                float numberReceived = 0;
-                //std::cout<<"Proccess "<<world_rank<<" waiting for number from Proccess "<<pairProccessRank<<std::endl;
-                MPI_Recv(&numberReceived, 1, MPI_FLOAT, pairProccessRank, SEND_NUMBER_TO_SUM_TO_PAIR_PROCCESS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                receiveNumberAndPush(pairProccessRank, my_numbers);
                 qtNumbersPair--;
-                //std::cout<<"Proccess "<<world_rank<<" received number!\n";
-                float numberToSumWith = my_numbers.top();
-                my_numbers.pop();
-                my_numbers.push(numberToSumWith + numberReceived);
             }else{
                 //std::cout<<"Proccess "<<world_rank<<" has already received all it's numbers from "<<pairProccessRank<<std::endl;
             }
