@@ -5,11 +5,13 @@
 #include <stack>
 
 #define SEND_TYPE_INIT_TAG 0
+#define SEND_TOTAL_NUMBERS 7
 #define SEND_QT_NUMBERS_EXPECTED_TAG 1
 #define SEND_INIT_NUM_TAG 2
 #define SEND_QT_PROC_WITH_NUMBERS 3
 #define SEND_NUMBER_AMOUNT_TO_PAIR_PROCCESS 4
 #define SEND_NUMBER_TO_SUM_TO_PAIR_PROCCESS 5
+#define SEND_LEFTOVER_PROCCESS_NUMBER_TO_SUM 6
 
 /**
  * @brief  Get the type of output via users input. "sum" (0) or "time" (1) and send it to all proccesses
@@ -40,7 +42,6 @@ void getType(int my_rank, int comm_sz, int& type){
     }
 }
 
-
 /**
  * @brief  Get the quantity of numbers from the user and calculates how many numbers each proccess
  *  will get via block partitioning and send it to each proccess
@@ -58,6 +59,11 @@ int getNumbersExpectedCount(int my_rank, int comm_sz, int& totalNumbers, int* qt
 
         std::cin>>totalNumbers;
         std::cout<<"Quantity of numbers : "<<totalNumbers<<std::endl;
+        
+        //Send totalNumbers to every proccess
+        for(int rankProccess = 1; rankProccess < comm_sz; rankProccess++){
+            MPI_Send(&totalNumbers, 1 , MPI_INT, rankProccess, SEND_TOTAL_NUMBERS, MPI_COMM_WORLD);
+        }
                         
         //There are more proccesses than numbers
         if(totalNumbers < comm_sz){
@@ -125,7 +131,8 @@ int getNumbersExpectedCount(int my_rank, int comm_sz, int& totalNumbers, int* qt
             MPI_Send(&qtNumbersProccesses[proccessRank], 1 , MPI_INT, proccessRank, SEND_QT_NUMBERS_EXPECTED_TAG, MPI_COMM_WORLD);
         }
     }else{
-
+        //Get totalNumbers from input
+        MPI_Recv(&totalNumbers, 1 , MPI_INT, 0, SEND_TOTAL_NUMBERS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         //get amount of proccesses that will be assigned numbers
         //may be fewer than the amount of proccesses available
         MPI_Recv(&qtProccessWithNumbers, 1 , MPI_INT, 0, SEND_QT_PROC_WITH_NUMBERS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
@@ -210,6 +217,16 @@ void getAllInputs(int my_rank, int comm_sz, int& type, int& totalNumbers, std::s
     getMyNumbers(my_rank, comm_sz, totalNumbers, my_numbers, qtNumbersProccesses, amountNumbersExpected);
 }
 
+/**
+ * @brief Calculates if this proccess will have a pair proccess to send and receive numbers or
+ * if it will be a leftover proccess
+ * 
+ * @param my_rank 
+ * @param comm_sz 
+ * @param numberOfProccessesTakenAcount 
+ * @return true 
+ * @return false 
+ */
 bool willHaveAPairProccess(const int my_rank, const int comm_sz, const int numberOfProccessesTakenAcount){
     //if there is a pair amount of proccesses
     if(numberOfProccessesTakenAcount % 2 == 0){
@@ -223,8 +240,6 @@ bool willHaveAPairProccess(const int my_rank, const int comm_sz, const int numbe
         return true;
     }
 
-    //it is the last odd proccess
-    std::cout<<"Proccess "<<my_rank<<" will not have a pair proccess!\n";
     return false;
 
 }
@@ -247,7 +262,7 @@ int getMyPairProccessRank(const int world_rank){
 }
 
 /**
- * @brief Get how many numbers my pair proccess has as my proccess send my amount of numbers as well
+ * @brief Get how many numbers my pair proccess has. My proccess will send my amount of numbers too
  * 
  * 
  * @param world_rank My proccess rank
@@ -268,20 +283,30 @@ int getQtNumbersPairProccess(const int world_rank, const int pairProccessRank, i
 }
 
 /**
- * @brief Wait for pairProccessRank to send a number. When it gets it, sum it with a number in the stack and push it
+ * @brief Wait for proccessToReceiveFromRank to send a number. When it gets it, sum it with a number in the stack and push it
  * 
  * @param pairProccessRank in 
  * @param my_numbers in
+ * @param tag in
  */
-void receiveNumberAndPush(const int pairProccessRank, std::stack<float>& my_numbers){
+void receiveNumberAndPush(const int proccessToReceiveFromRank, std::stack<float>& my_numbers, const int tag){
     float numberReceived = 0;
-    MPI_Recv(&numberReceived, 1, MPI_FLOAT, pairProccessRank, SEND_NUMBER_TO_SUM_TO_PAIR_PROCCESS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    MPI_Recv(&numberReceived, 1, MPI_FLOAT, proccessToReceiveFromRank, tag, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
     float numberToSumWith = my_numbers.top();
     my_numbers.pop();
     my_numbers.push(numberToSumWith + numberReceived);
 }
 
-void sumUntilItCan(const int world_rank, const int pairProccessRank, int qtNumbersPair, std::stack<float>& my_numbers){
+/**
+ * @brief Given a pair proccess to this proccess, they will comunicate and sum its numbers in a cross way
+ * until there is only one number left on each proccess
+ * 
+ * @param world_rank 
+ * @param pairProccessRank 
+ * @param qtNumbersPair 
+ * @param my_numbers 
+ */
+void sumWhileItCan(const int world_rank, const int pairProccessRank, int qtNumbersPair, std::stack<float>& my_numbers){
     bool stillHaveNumbersToSend = my_numbers.size() != 1;
     bool stillHaveNumbersToReceive = qtNumbersPair != 1;
 
@@ -289,7 +314,6 @@ void sumUntilItCan(const int world_rank, const int pairProccessRank, int qtNumbe
         
         float numberToSend = 0;
         if(stillHaveNumbersToSend){
-            //std::cout<<"Proccess "<<world_rank<<" still has numbers to send to"<<pairProccessRank<<std::endl;
             numberToSend = my_numbers.top();
             my_numbers.pop();
         }
@@ -297,34 +321,24 @@ void sumUntilItCan(const int world_rank, const int pairProccessRank, int qtNumbe
         //First part of communication
         if(world_rank % 2 == 0){
             if(stillHaveNumbersToReceive){
-                receiveNumberAndPush(pairProccessRank, my_numbers);
+                receiveNumberAndPush(pairProccessRank, my_numbers, SEND_NUMBER_TO_SUM_TO_PAIR_PROCCESS);
                 qtNumbersPair--;
-            }else{
-                //std::cout<<"Proccess "<<world_rank<<" has already received all it's numbers from "<<pairProccessRank<<std::endl;
             }
         }else{
             if(stillHaveNumbersToSend){
-                //std::cout<<"Proccess "<<world_rank<<" sending number to Proccess "<<pairProccessRank<<std::endl;
                 MPI_Send(&numberToSend, 1, MPI_INT, pairProccessRank, SEND_NUMBER_TO_SUM_TO_PAIR_PROCCESS, MPI_COMM_WORLD);
-            }else{
-                //std::cout<<"Proccess "<<world_rank<<" has already sent all it's numbers from"<<pairProccessRank<<std::endl;
             }
         }
         
         //Second part of communication
         if(world_rank % 2 == 0){
             if(stillHaveNumbersToSend){
-                //std::cout<<"Proccess "<<world_rank<<" sending number to Proccess "<<pairProccessRank<<std::endl;
                 MPI_Send(&numberToSend, 1, MPI_INT, pairProccessRank, SEND_NUMBER_TO_SUM_TO_PAIR_PROCCESS, MPI_COMM_WORLD);
-            }else{
-                //std::cout<<"Proccess "<<world_rank<<" has already sent all it's numbers from"<<pairProccessRank<<std::endl;
             }
         }else{
             if(stillHaveNumbersToReceive){
-                receiveNumberAndPush(pairProccessRank, my_numbers);
+                receiveNumberAndPush(pairProccessRank, my_numbers, SEND_NUMBER_TO_SUM_TO_PAIR_PROCCESS);
                 qtNumbersPair--;
-            }else{
-                //std::cout<<"Proccess "<<world_rank<<" has already received all it's numbers from "<<pairProccessRank<<std::endl;
             }
         }
 
@@ -334,6 +348,54 @@ void sumUntilItCan(const int world_rank, const int pairProccessRank, int qtNumbe
     
 }
 
+/**
+ * @brief Calculates, given a leftover proccess, if this proccess should receive any number from it
+ * 
+ * @param my_rank 
+ * @param qtNumbersLeftOverProccessHasToSend 
+ * @return true 
+ * @return false 
+ */
+bool shouldReceiveNumberFromLeftOverProccess(const int my_rank, const int qtNumbersLeftOverProccessHasToSend){
+    return qtNumbersLeftOverProccessHasToSend >= 1 && my_rank < qtNumbersLeftOverProccessHasToSend;
+}
+
+/**
+ * @brief Calculates, given a leftover proccess, how many numbers it should send to other processes
+ * 
+ * @param totalAmountNumbers 
+ * @param qtProccessWithNumbers 
+ * @return int 
+ */
+int calculateHowManyNumbersLeftOverProcHasToSend(const int totalAmountNumbers, const int qtProccessWithNumbers){
+    //The total amount of numbers it has is the minimun
+    int qtNumbersLeftOverProccess = (int) totalAmountNumbers/qtProccessWithNumbers;
+
+    //It will send all but one
+    return qtNumbersLeftOverProccess - 1;
+}
+
+/**
+ * @brief Calculates, given a leftover proccess, how many numbers this proccess should receive from it
+ * 
+ * @param qtNumbersLeftOverProccessHasToSend 
+ * @param qtProccessWithNumbers 
+ * @param myRank 
+ * @return int 
+ */
+int calculateHowManyNumbersToRecFromLeftOverProccess(const int qtNumbersLeftOverProccessHasToSend,
+                                                    const int qtProccessWithNumbers,
+                                                    const int myRank){
+
+    int qtNumberToReceiveFromLeftOverProccess = (int) qtNumbersLeftOverProccessHasToSend/(qtProccessWithNumbers - 1);
+    int numbersLeft = qtNumbersLeftOverProccessHasToSend % (qtProccessWithNumbers - 1);
+
+    if(myRank < numbersLeft){
+        qtNumberToReceiveFromLeftOverProccess++;
+    }
+
+    return qtNumberToReceiveFromLeftOverProccess;
+}
 
 int main(int argc, char** argv){
 
@@ -354,42 +416,68 @@ int main(int argc, char** argv){
 
     getAllInputs(world_rank, world_size, type, totalNumbers, my_numbers, qtProccessWithNumbers);
 
-    //Se o processo atual contém numeros
     if (my_numbers.size() != 0){
 
-        //Se for possível formar um par com ele
         if(willHaveAPairProccess(world_rank, world_size, qtProccessWithNumbers)){
             int pairProccessRank = getMyPairProccessRank(world_rank);
-
-            std::cout<<"Pair assigned: "<<world_rank<<" -- "<<pairProccessRank<<"\n";
-
-            //O número par espera primeiro e o ímpar envia primeiro. Depois o contrário
             
             int qtNumbersPair = 0;
             int myQtNumbers = my_numbers.size();
 
             qtNumbersPair = getQtNumbersPairProccess(world_rank, pairProccessRank, myQtNumbers);
 
-            sumUntilItCan(world_rank, pairProccessRank, qtNumbersPair, my_numbers);
+            sumWhileItCan(world_rank, pairProccessRank, qtNumbersPair, my_numbers);
 
-            std::cout<<"Proccess "<<world_rank<<" has "<<my_numbers.size()<<" numbers in its stack!\n";
+            bool thereIsLeftOverProccess = qtProccessWithNumbers % 2 != 0;
+            if(thereIsLeftOverProccess){
 
-            if(my_numbers.size() == 1){
-                std::cout<<"Proccess "<<world_rank<<" has "<<my_numbers.top()<<" in its stack!\n";
+                int qtNumbersLeftOverProccessHasToSend = calculateHowManyNumbersLeftOverProcHasToSend(totalNumbers, qtProccessWithNumbers);
+                if(shouldReceiveNumberFromLeftOverProccess(world_rank, qtNumbersLeftOverProccessHasToSend)){
+
+                    int qtNumberToReceiveFromLeftOverProccess = calculateHowManyNumbersToRecFromLeftOverProccess(
+                                                                                            qtNumbersLeftOverProccessHasToSend,
+                                                                                            qtProccessWithNumbers,
+                                                                                            world_rank);
+
+                    int leftOverProccessRank = qtProccessWithNumbers-1;
+                    for(int numberReceivedCount = 0; numberReceivedCount < qtNumberToReceiveFromLeftOverProccess; numberReceivedCount++){
+                        receiveNumberAndPush(leftOverProccessRank, my_numbers, SEND_LEFTOVER_PROCCESS_NUMBER_TO_SUM);
+                    }
+
+                }
+
             }
-            //until both have only one number
-            if(world_rank % 2 == 0){
-                //recv
-            }else{
-                //send
-            }
-
+            
         }else{
-            //Se o processo sobrar, após todo processo trocar informação com seu par
-            //ele deve enviar um número para cada processo
+            //Its a leftover proccess. A proccess without a pair proccess
 
+            bool shouldSendToOtherProccesses = my_numbers.size() > 1;
+            if(shouldSendToOtherProccesses){
+                
+                int qtNumbersToSend = my_numbers.size() - 1;
+
+                //All proccesses but this one
+                int qtProccessAvailableToReceive = qtProccessWithNumbers - 1;
+
+                for(int numbersSentCount = 0; numbersSentCount < qtNumbersToSend; numbersSentCount++){
+                    float numberToSend = my_numbers.top();
+                    my_numbers.pop();
+
+                    int proccessRankToReceiveNumber =  numbersSentCount % qtProccessAvailableToReceive;
+
+                    MPI_Send(&numberToSend, 1, MPI_FLOAT, proccessRankToReceiveNumber, 
+                                SEND_LEFTOVER_PROCCESS_NUMBER_TO_SUM, MPI_COMM_WORLD);
+
+                }
+
+            }
 
         }
+
+    }
+
+    if(my_numbers.size() == 1){
+        std::cout<<"Proccess "<<world_rank<<" has "<<my_numbers.top()<<" in its stack!\n";
     }
 
     //Reduction phase
