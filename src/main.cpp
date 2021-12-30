@@ -3,6 +3,7 @@
 #include <chrono>
 #include <string>
 #include <stack>
+#include <math.h>
 
 #define SEND_TYPE_INIT_TAG 0
 #define SEND_TOTAL_NUMBERS 7
@@ -12,6 +13,8 @@
 #define SEND_NUMBER_AMOUNT_TO_PAIR_PROCCESS 4
 #define SEND_NUMBER_TO_SUM_TO_PAIR_PROCCESS 5
 #define SEND_LEFTOVER_PROCCESS_NUMBER_TO_SUM 6
+#define SEND_NUMBER_TO_SUM_TO_PAIR_PROCCESS_REDUCTION_PHASE 7
+#define SEND_LEFTOVER_PROCCESS_NUMBER_TO_SUM_REDUCTION_PHASE 8
 
 /**
  * @brief  Get the type of output via users input. "sum" (0) or "time" (1) and send it to all proccesses
@@ -251,7 +254,7 @@ bool willHaveAPairProccess(const int my_rank, const int comm_sz, const int numbe
  * @param world_rank My rank
  * @return int 
  */
-int getMyPairProccessRank(const int world_rank){
+int getMyPairProccessRankCrossSumPhase(const int world_rank){
     if(world_rank % 2 == 0){
         //My pair proccess its the next rank
         return world_rank + 1;
@@ -298,6 +301,19 @@ void receiveNumberAndPush(const int proccessToReceiveFromRank, std::stack<float>
 }
 
 /**
+ * @brief Pop a number from the queue and send it to proccessRankToReceive using the specified tag
+ * 
+ * @param proccessRankToReceive 
+ * @param my_numbers 
+ * @param tag 
+ */
+void popNumberAndSend(const int proccessRankToReceive, std::stack<float>& my_numbers, const int tag){
+    float numberToSend = my_numbers.top();
+    my_numbers.pop();
+    MPI_Send(&numberToSend, 1, MPI_FLOAT, proccessRankToReceive, tag, MPI_COMM_WORLD);     
+}
+
+/**
  * @brief Given a pair proccess to this proccess, they will comunicate and sum its numbers in a cross way
  * until there is only one number left on each proccess
  * 
@@ -326,14 +342,14 @@ void sumWhileItCan(const int world_rank, const int pairProccessRank, int qtNumbe
             }
         }else{
             if(stillHaveNumbersToSend){
-                MPI_Send(&numberToSend, 1, MPI_INT, pairProccessRank, SEND_NUMBER_TO_SUM_TO_PAIR_PROCCESS, MPI_COMM_WORLD);
+                MPI_Send(&numberToSend, 1, MPI_FLOAT, pairProccessRank, SEND_NUMBER_TO_SUM_TO_PAIR_PROCCESS, MPI_COMM_WORLD);
             }
         }
         
         //Second part of communication
         if(world_rank % 2 == 0){
             if(stillHaveNumbersToSend){
-                MPI_Send(&numberToSend, 1, MPI_INT, pairProccessRank, SEND_NUMBER_TO_SUM_TO_PAIR_PROCCESS, MPI_COMM_WORLD);
+                MPI_Send(&numberToSend, 1, MPI_FLOAT, pairProccessRank, SEND_NUMBER_TO_SUM_TO_PAIR_PROCCESS, MPI_COMM_WORLD);
             }
         }else{
             if(stillHaveNumbersToReceive){
@@ -397,36 +413,62 @@ int calculateHowManyNumbersToRecFromLeftOverProccess(const int qtNumbersLeftOver
     return qtNumberToReceiveFromLeftOverProccess;
 }
 
-int main(int argc, char** argv){
+/**
+ * @brief Given a pair proccess, do the cross sum until both have only one number left
+ * 
+ * @param world_rank 
+ * @param pairProccessRank 
+ * @param my_numbers 
+ */
+void crossSumWithPairProccess(const int world_rank, const int pairProccessRank, std::stack<float>& my_numbers){
+    int myQtNumbers = my_numbers.size();
+    int qtNumbersPair = getQtNumbersPairProccess(world_rank, pairProccessRank, myQtNumbers);
 
-    auto initTime = std::chrono::high_resolution_clock::now();
+    sumWhileItCan(world_rank, pairProccessRank, qtNumbersPair, my_numbers);
+}
 
-    MPI_Init(NULL, NULL);
+/**
+ * @brief Sends each leftover number to a different proccess, so it completes the crossSumPhase
+ * 
+ * @param my_numbers Numbers of the leftOver proccess in the crossSumPhase 
+ * @param qtProccessWithNumbers 
+ */
+void sendLeftOverNumberCrossSumPhase(std::stack<float>& my_numbers, const int qtProccessWithNumbers){
+    int qtNumbersToSend = my_numbers.size() - 1;
 
-    int world_size;
-    MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+    //All proccesses but this one
+    int qtProccessAvailableToReceive = qtProccessWithNumbers - 1;
 
-    int world_rank;
-    MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+    for(int numbersSentCount = 0; numbersSentCount < qtNumbersToSend; numbersSentCount++){
+        float numberToSend = my_numbers.top();
+        my_numbers.pop();
 
-    std::stack<float> my_numbers;
-    int type = 0;
-    int totalNumbers = 0;
-    int qtProccessWithNumbers = 0;
+        int proccessRankToReceiveNumber =  numbersSentCount % qtProccessAvailableToReceive;
 
-    getAllInputs(world_rank, world_size, type, totalNumbers, my_numbers, qtProccessWithNumbers);
+        MPI_Send(&numberToSend, 1, MPI_FLOAT, proccessRankToReceiveNumber, 
+                    SEND_LEFTOVER_PROCCESS_NUMBER_TO_SUM, MPI_COMM_WORLD);
+
+    }
+}
+
+/**
+ * @brief Create pairs of proccesses that sum up their numbers until each one has only one number left in its queue.
+ * Treats border cases like an odd number of proccesses and pair proccesses with unequal quantity of numbers.
+ * 
+ * @param world_rank This proccess rank (in)
+ * @param my_numbers This proccess numbers (in/out)
+ * @param world_size Number of proccesses in total (in)
+ * @param qtProccessWithNumbers Number of proccesses that actually have numbers in its queue (in)
+ */
+void crossSumPhase(const int world_rank,  std::stack<float>& my_numbers, const int world_size,
+                     const int qtProccessWithNumbers, const int totalNumbers){
 
     if (my_numbers.size() != 0){
 
         if(willHaveAPairProccess(world_rank, world_size, qtProccessWithNumbers)){
-            int pairProccessRank = getMyPairProccessRank(world_rank);
             
-            int qtNumbersPair = 0;
-            int myQtNumbers = my_numbers.size();
-
-            qtNumbersPair = getQtNumbersPairProccess(world_rank, pairProccessRank, myQtNumbers);
-
-            sumWhileItCan(world_rank, pairProccessRank, qtNumbersPair, my_numbers);
+            int pairProccessRank = getMyPairProccessRankCrossSumPhase(world_rank);
+            crossSumWithPairProccess(world_rank, pairProccessRank, my_numbers);
 
             bool thereIsLeftOverProccess = qtProccessWithNumbers % 2 != 0;
             if(thereIsLeftOverProccess){
@@ -453,34 +495,98 @@ int main(int argc, char** argv){
 
             bool shouldSendToOtherProccesses = my_numbers.size() > 1;
             if(shouldSendToOtherProccesses){
-                
-                int qtNumbersToSend = my_numbers.size() - 1;
-
-                //All proccesses but this one
-                int qtProccessAvailableToReceive = qtProccessWithNumbers - 1;
-
-                for(int numbersSentCount = 0; numbersSentCount < qtNumbersToSend; numbersSentCount++){
-                    float numberToSend = my_numbers.top();
-                    my_numbers.pop();
-
-                    int proccessRankToReceiveNumber =  numbersSentCount % qtProccessAvailableToReceive;
-
-                    MPI_Send(&numberToSend, 1, MPI_FLOAT, proccessRankToReceiveNumber, 
-                                SEND_LEFTOVER_PROCCESS_NUMBER_TO_SUM, MPI_COMM_WORLD);
-
-                }
-
+                sendLeftOverNumberCrossSumPhase(my_numbers, qtProccessWithNumbers);
             }
-
         }
 
     }
+}
 
-    if(my_numbers.size() == 1){
-        std::cout<<"Proccess "<<world_rank<<" has "<<my_numbers.top()<<" in its stack!\n";
+/**
+ * @brief This is the reduction phase. If qtProccessWithNumbers is even, it has log2(qtProccessWithNumbers) iterations. 
+ * If qtProccessWithNumbers is odd, it has log2(qtProccessWithNumbers)+1 phase.
+ * In the end, the proccess's queue with rank equal to 0 will contain the final result.
+ * @param world_rank 
+ * @param my_numbers 
+ * @param qtProccessWithNumbers 
+ */
+void reductionPhase(const int world_rank, std::stack<float>& my_numbers, const int qtProccessWithNumbers){
+    unsigned int numPhases = (int) log2(qtProccessWithNumbers);
+
+    if(world_rank == 0){
+        std::cout<<"qtProccessWithNumbers: "<<qtProccessWithNumbers<<std::endl;
+        std::cout<<"Num fases: "<<numPhases<<std::endl;
     }
 
-    //Reduction phase
+    unsigned int qtProccessThisPhase = pow(2, numPhases);
+    bool thereIsALeftOverProccess = pow(2, numPhases) != qtProccessWithNumbers;
+    unsigned int lastProccessRank = qtProccessWithNumbers - 1;
+
+    if(!thereIsALeftOverProccess || (thereIsALeftOverProccess && world_rank != lastProccessRank)){
+        for(unsigned int thisPhase = 1; thisPhase <= numPhases; thisPhase ++){
+            if(world_rank == 0){
+                std::cout<<"Fase de redução: "<<thisPhase<<std::endl;
+            }
+
+            //As qtProccessThisPhase is a power of two, this division will always be an integer
+            unsigned int halfCountProccessesThisPhase = qtProccessThisPhase/2;
+
+            if(world_rank < halfCountProccessesThisPhase){
+                //This proccess is a destiny proccess
+                int rankProccessThatWillSendNumber = world_rank + halfCountProccessesThisPhase;
+                receiveNumberAndPush(rankProccessThatWillSendNumber, my_numbers, SEND_NUMBER_TO_SUM_TO_PAIR_PROCCESS_REDUCTION_PHASE);
+            }else{
+                //This proccess it's an origin proccess
+                
+                int rankProccessToSendNumber = world_rank - halfCountProccessesThisPhase;
+                popNumberAndSend(rankProccessToSendNumber, my_numbers, SEND_NUMBER_TO_SUM_TO_PAIR_PROCCESS_REDUCTION_PHASE);
+                
+                //This proccess will not be in any other phase
+                break;
+            }
+            qtProccessThisPhase = qtProccessThisPhase/2;
+        }
+    }
+
+    //At this point, only proccess 0 and leftOverProccess (if there is one) will have a number in its queue.
+    
+    if(thereIsALeftOverProccess){
+        if(world_rank == lastProccessRank){
+            float numberToSend = my_numbers.top();
+            my_numbers.pop();
+            MPI_Send(&numberToSend, 1, MPI_FLOAT, 0, SEND_LEFTOVER_PROCCESS_NUMBER_TO_SUM_REDUCTION_PHASE, MPI_COMM_WORLD);
+        }else if(world_rank == 0){
+            receiveNumberAndPush(qtProccessWithNumbers - 1, my_numbers, SEND_LEFTOVER_PROCCESS_NUMBER_TO_SUM_REDUCTION_PHASE);
+        }
+    }
+}
+
+int main(int argc, char** argv){
+
+    auto initTime = std::chrono::high_resolution_clock::now();
+
+    MPI_Init(NULL, NULL);
+
+    int world_size;
+    MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+
+    int world_rank;
+    MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+
+    std::stack<float> my_numbers;
+    int type = 0;
+    int totalNumbers = 0;
+    int qtProccessWithNumbers = 0;
+
+    getAllInputs(world_rank, world_size, type, totalNumbers, my_numbers, qtProccessWithNumbers);
+
+    crossSumPhase(world_rank, my_numbers, world_size, qtProccessWithNumbers, totalNumbers);
+
+    reductionPhase(world_rank, my_numbers, qtProccessWithNumbers);
+    
+    if(world_rank == 0){
+        std::cout<<"SOMA TOTAL: "<<my_numbers.top()<<std::endl;
+    }
 
     MPI_Finalize();
 
