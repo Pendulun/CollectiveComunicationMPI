@@ -5,16 +5,25 @@
 #include <stack>
 #include <math.h>
 
-#define SEND_TYPE_INIT_TAG 0
-#define SEND_TOTAL_NUMBERS 7
-#define SEND_QT_NUMBERS_EXPECTED_TAG 1
-#define SEND_INIT_NUM_TAG 2
-#define SEND_QT_PROC_WITH_NUMBERS 3
-#define SEND_NUMBER_AMOUNT_TO_PAIR_PROCCESS 4
-#define SEND_NUMBER_TO_SUM_TO_PAIR_PROCCESS 5
-#define SEND_LEFTOVER_PROCCESS_NUMBER_TO_SUM 6
-#define SEND_NUMBER_TO_SUM_TO_PAIR_PROCCESS_REDUCTION_PHASE 7
-#define SEND_LEFTOVER_PROCCESS_NUMBER_TO_SUM_REDUCTION_PHASE 8
+
+enum SendTag {
+    SEND_TYPE_INIT_TAG,
+    SEND_TOTAL_NUMBERS,
+    SEND_QT_NUMBERS_EXPECTED_TAG,
+    SEND_INIT_NUM_TAG,
+    SEND_QT_PROC_WITH_NUMBERS,
+    SEND_NUMBER_AMOUNT_TO_PAIR_PROCCESS,
+    SEND_NUMBER_TO_SUM_TO_PAIR_PROCCESS,
+    SEND_LEFTOVER_PROCCESS_NUMBER_TO_SUM,
+    SEND_NUMBER_TO_SUM_TO_PAIR_PROCCESS_REDUCTION_PHASE,
+    SEND_LEFTOVER_PROCCESS_NUMBER_TO_SUM_REDUCTION_PHASE
+};
+
+enum TypeFlag{
+    SUM,
+    TIME,
+    ALL
+};
 
 /**
  * @brief  Get the type of output via users input. "sum" (0) or "time" (1) and send it to all proccesses
@@ -23,25 +32,25 @@
  * @param comm_sz in
  * @param type out
  */
-void getType(const unsigned int myRank, const unsigned int comm_sz, int& type){
+void getType(const unsigned int myRank, const unsigned int comm_sz, TypeFlag& type){
     if(myRank == 0){
         std::string typeRead;
         std::cin>>typeRead;
         
         if(typeRead.compare("sum") == 0){
-            type = 0;
+            type = TypeFlag::SUM;
         }else if (typeRead.compare("time") == 0){
-            type = 1;
+            type = TypeFlag::TIME;
         }else{
-            type = 2;
+            type = TypeFlag::ALL;
         }
 
         //send type to every other proccess
         for (int proccessRank = 1; proccessRank< comm_sz; proccessRank++){
-            MPI_Send(&type, 1 , MPI_INT, proccessRank, SEND_TYPE_INIT_TAG, MPI_COMM_WORLD);
+            MPI_Send(&type, 1 , MPI_INT, proccessRank, SendTag::SEND_TYPE_INIT_TAG, MPI_COMM_WORLD);
         }
     }else{
-        MPI_Recv(&type, 1 , MPI_INT, 0, SEND_TYPE_INIT_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Recv(&type, 1 , MPI_INT, 0, SendTag::SEND_TYPE_INIT_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
     }
 }
 
@@ -66,14 +75,14 @@ unsigned int getNumbersExpectedCount(const unsigned int myRank, const unsigned i
         
         //Send totalNumbers to every proccess
         for(int rankProccess = 1; rankProccess < comm_sz; rankProccess++){
-            MPI_Send(&totalNumbers, 1 , MPI_INT, rankProccess, SEND_TOTAL_NUMBERS, MPI_COMM_WORLD);
+            MPI_Send(&totalNumbers, 1 , MPI_INT, rankProccess, SendTag::SEND_TOTAL_NUMBERS, MPI_COMM_WORLD);
         }
                         
         //There are more proccesses than numbers
         if(totalNumbers < comm_sz){
             qtProccessWithNumbers = totalNumbers;
 
-            std::cout<<" There are more proccesses than numbers!\n";
+            //std::cout<<" There are more proccesses than numbers!\n";
                             
             //Set each proccess with one number until it reaches the necessary amount.
             //Set 0 numbers for proccesses if needed
@@ -96,12 +105,12 @@ unsigned int getNumbersExpectedCount(const unsigned int myRank, const unsigned i
                 qtNumbersProccesses[proccess] = minimunNumbersPerProccess;
             }
 
-            std::cout<<"Numbers per Proccess: "<<minimunNumbersPerProccess<<std::endl;
+            //std::cout<<"Numbers per Proccess: "<<minimunNumbersPerProccess<<std::endl;
 
             bool everyProccessGetSameAmountNumbers = minimunNumbersPerProccess * comm_sz == totalNumbers;
             if(!everyProccessGetSameAmountNumbers){//There will be proccesses with more numbers than others
 
-                std::cout<<"Every Proccess will get at least "<<minimunNumbersPerProccess<<" numbers!\n";
+                //std::cout<<"Every Proccess will get at least "<<minimunNumbersPerProccess<<" numbers!\n";
 
                 //Add one number count to each proccess until all leftovers were assigned
                 int qtLeftOverNumbers = totalNumbers - minimunNumbersPerProccess * comm_sz;
@@ -121,11 +130,11 @@ unsigned int getNumbersExpectedCount(const unsigned int myRank, const unsigned i
 
         }
 
-        std::cout<<"Quantity of proccesses with numbers: "<<qtProccessWithNumbers<<std::endl;
+        //std::cout<<"Quantity of proccesses with numbers: "<<qtProccessWithNumbers<<std::endl;
         
         //Send to every proccess the amount of proccesses that have numbers assigned
         for (int proccessRank = 1; proccessRank< comm_sz; proccessRank++){
-            MPI_Send(&qtProccessWithNumbers, 1 , MPI_INT, proccessRank, SEND_QT_PROC_WITH_NUMBERS, MPI_COMM_WORLD);
+            MPI_Send(&qtProccessWithNumbers, 1 , MPI_INT, proccessRank, SendTag::SEND_QT_PROC_WITH_NUMBERS, MPI_COMM_WORLD);
         }
 
         //This proccess (0) already knows how much to expect
@@ -133,16 +142,16 @@ unsigned int getNumbersExpectedCount(const unsigned int myRank, const unsigned i
         
         //Send to every other proccess the amount of numbers it should expect
         for (int proccessRank = 1; proccessRank< comm_sz; proccessRank++){
-            MPI_Send(&qtNumbersProccesses[proccessRank], 1 , MPI_INT, proccessRank, SEND_QT_NUMBERS_EXPECTED_TAG, MPI_COMM_WORLD);
+            MPI_Send(&qtNumbersProccesses[proccessRank], 1 , MPI_INT, proccessRank, SendTag::SEND_QT_NUMBERS_EXPECTED_TAG, MPI_COMM_WORLD);
         }
     }else{
         //Get totalNumbers from input
-        MPI_Recv(&totalNumbers, 1 , MPI_INT, 0, SEND_TOTAL_NUMBERS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Recv(&totalNumbers, 1 , MPI_INT, 0, SendTag::SEND_TOTAL_NUMBERS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         //get amount of proccesses that will be assigned numbers
         //may be fewer than the amount of proccesses available
-        MPI_Recv(&qtProccessWithNumbers, 1 , MPI_INT, 0, SEND_QT_PROC_WITH_NUMBERS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Recv(&qtProccessWithNumbers, 1 , MPI_INT, 0, SendTag::SEND_QT_PROC_WITH_NUMBERS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         //Get the amount of numbers that the proccess will haves
-        MPI_Recv(&numbersExpectedCount, 1 , MPI_INT, 0, SEND_QT_NUMBERS_EXPECTED_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Recv(&numbersExpectedCount, 1 , MPI_INT, 0, SendTag::SEND_QT_NUMBERS_EXPECTED_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
     }
 
     return numbersExpectedCount;
@@ -184,7 +193,7 @@ void getMyNumbers(const unsigned int myRank, const unsigned int comm_sz, const i
             if(processToSendRank == 0){
                 my_numbers.push(numberRead);
             }else{ //Send the number to proccess otherwise
-                MPI_Send(&numberRead, 1, MPI_FLOAT, processToSendRank, SEND_INIT_NUM_TAG, MPI_COMM_WORLD);
+                MPI_Send(&numberRead, 1, MPI_FLOAT, processToSendRank, SendTag::SEND_INIT_NUM_TAG, MPI_COMM_WORLD);
             }
 
             numbersSentForProccessCount++;
@@ -194,7 +203,7 @@ void getMyNumbers(const unsigned int myRank, const unsigned int comm_sz, const i
         //Get assigned numbers and push then to queue
         float numberRead = 0.0;
         for(unsigned int numberCount = 0; numberCount < numbersExpected; numberCount++){
-            MPI_Recv(&numberRead, 1, MPI_FLOAT, 0, SEND_INIT_NUM_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Recv(&numberRead, 1, MPI_FLOAT, 0, SendTag::SEND_INIT_NUM_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
             my_numbers.push(numberRead);
         }
         
@@ -214,7 +223,8 @@ void getMyNumbers(const unsigned int myRank, const unsigned int comm_sz, const i
  * @param myNumbers out
  * @param qtProccessWithNumbers out 
  */
-void getAllInputs(const unsigned int myRank, const unsigned int comm_sz, int& type, int& totalNumbers, std::stack<float>& myNumbers, int& qtProccessWithNumbers){
+void getAllInputs(const unsigned int myRank, const unsigned int comm_sz, TypeFlag& type, int& totalNumbers,
+                     std::stack<float>& myNumbers, int& qtProccessWithNumbers){
     
     //if there are more proccesses than numbers
     getType(myRank, comm_sz, type);
@@ -280,11 +290,11 @@ int getMyPairProccessRankCrossSumPhase(const int world_rank){
 int getQtNumbersPairProccess(const int world_rank, const int pairProccessRank, int myQtNumbers){
     int qtNumbersPair = 0;
     if(world_rank % 2 == 0){
-        MPI_Recv(&qtNumbersPair, 1, MPI_INT, pairProccessRank, SEND_NUMBER_AMOUNT_TO_PAIR_PROCCESS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        MPI_Send(&myQtNumbers, 1, MPI_INT, pairProccessRank, SEND_NUMBER_AMOUNT_TO_PAIR_PROCCESS, MPI_COMM_WORLD);
+        MPI_Recv(&qtNumbersPair, 1, MPI_INT, pairProccessRank, SendTag::SEND_NUMBER_AMOUNT_TO_PAIR_PROCCESS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Send(&myQtNumbers, 1, MPI_INT, pairProccessRank, SendTag::SEND_NUMBER_AMOUNT_TO_PAIR_PROCCESS, MPI_COMM_WORLD);
     }else{
-        MPI_Send(&myQtNumbers, 1, MPI_INT, pairProccessRank, SEND_NUMBER_AMOUNT_TO_PAIR_PROCCESS, MPI_COMM_WORLD);
-        MPI_Recv(&qtNumbersPair, 1, MPI_INT, pairProccessRank, SEND_NUMBER_AMOUNT_TO_PAIR_PROCCESS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Send(&myQtNumbers, 1, MPI_INT, pairProccessRank, SendTag::SEND_NUMBER_AMOUNT_TO_PAIR_PROCCESS, MPI_COMM_WORLD);
+        MPI_Recv(&qtNumbersPair, 1, MPI_INT, pairProccessRank, SendTag::SEND_NUMBER_AMOUNT_TO_PAIR_PROCCESS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
     }
     return qtNumbersPair;
 }
@@ -341,23 +351,23 @@ void sumWhileItCan(const int world_rank, const int pairProccessRank, int qtNumbe
         //First part of communication
         if(world_rank % 2 == 0){
             if(stillHaveNumbersToReceive){
-                receiveNumberAndPush(pairProccessRank, my_numbers, SEND_NUMBER_TO_SUM_TO_PAIR_PROCCESS);
+                receiveNumberAndPush(pairProccessRank, my_numbers, SendTag::SEND_NUMBER_TO_SUM_TO_PAIR_PROCCESS);
                 qtNumbersPair--;
             }
         }else{
             if(stillHaveNumbersToSend){
-                MPI_Send(&numberToSend, 1, MPI_FLOAT, pairProccessRank, SEND_NUMBER_TO_SUM_TO_PAIR_PROCCESS, MPI_COMM_WORLD);
+                MPI_Send(&numberToSend, 1, MPI_FLOAT, pairProccessRank, SendTag::SEND_NUMBER_TO_SUM_TO_PAIR_PROCCESS, MPI_COMM_WORLD);
             }
         }
         
         //Second part of communication
         if(world_rank % 2 == 0){
             if(stillHaveNumbersToSend){
-                MPI_Send(&numberToSend, 1, MPI_FLOAT, pairProccessRank, SEND_NUMBER_TO_SUM_TO_PAIR_PROCCESS, MPI_COMM_WORLD);
+                MPI_Send(&numberToSend, 1, MPI_FLOAT, pairProccessRank, SendTag::SEND_NUMBER_TO_SUM_TO_PAIR_PROCCESS, MPI_COMM_WORLD);
             }
         }else{
             if(stillHaveNumbersToReceive){
-                receiveNumberAndPush(pairProccessRank, my_numbers, SEND_NUMBER_TO_SUM_TO_PAIR_PROCCESS);
+                receiveNumberAndPush(pairProccessRank, my_numbers, SendTag::SEND_NUMBER_TO_SUM_TO_PAIR_PROCCESS);
                 qtNumbersPair--;
             }
         }
@@ -450,7 +460,7 @@ void sendLeftOverNumberCrossSumPhase(std::stack<float>& my_numbers, const int qt
         int proccessRankToReceiveNumber =  numbersSentCount % qtProccessAvailableToReceive;
 
         MPI_Send(&numberToSend, 1, MPI_FLOAT, proccessRankToReceiveNumber, 
-                    SEND_LEFTOVER_PROCCESS_NUMBER_TO_SUM, MPI_COMM_WORLD);
+                    SendTag::SEND_LEFTOVER_PROCCESS_NUMBER_TO_SUM, MPI_COMM_WORLD);
 
     }
 }
@@ -487,7 +497,7 @@ void crossSumPhase(const int world_rank,  std::stack<float>& my_numbers, const i
 
                     int leftOverProccessRank = qtProccessWithNumbers-1;
                     for(int numberReceivedCount = 0; numberReceivedCount < qtNumberToReceiveFromLeftOverProccess; numberReceivedCount++){
-                        receiveNumberAndPush(leftOverProccessRank, my_numbers, SEND_LEFTOVER_PROCCESS_NUMBER_TO_SUM);
+                        receiveNumberAndPush(leftOverProccessRank, my_numbers, SendTag::SEND_LEFTOVER_PROCCESS_NUMBER_TO_SUM);
                     }
 
                 }
@@ -538,12 +548,12 @@ void reductionPhase(const int world_rank, std::stack<float>& my_numbers, const i
             if(world_rank < halfCountProccessesThisPhase){
                 //This proccess is a destiny proccess
                 int rankProccessThatWillSendNumber = world_rank + halfCountProccessesThisPhase;
-                receiveNumberAndPush(rankProccessThatWillSendNumber, my_numbers, SEND_NUMBER_TO_SUM_TO_PAIR_PROCCESS_REDUCTION_PHASE);
+                receiveNumberAndPush(rankProccessThatWillSendNumber, my_numbers, SendTag::SEND_NUMBER_TO_SUM_TO_PAIR_PROCCESS_REDUCTION_PHASE);
             }else{
                 //This proccess it's an origin proccess
                 
                 int rankProccessToSendNumber = world_rank - halfCountProccessesThisPhase;
-                popNumberAndSend(rankProccessToSendNumber, my_numbers, SEND_NUMBER_TO_SUM_TO_PAIR_PROCCESS_REDUCTION_PHASE);
+                popNumberAndSend(rankProccessToSendNumber, my_numbers, SendTag::SEND_NUMBER_TO_SUM_TO_PAIR_PROCCESS_REDUCTION_PHASE);
                 
                 //This proccess will not be in any other phase
                 break;
@@ -558,16 +568,19 @@ void reductionPhase(const int world_rank, std::stack<float>& my_numbers, const i
         if(world_rank == lastProccessRank){
             float numberToSend = my_numbers.top();
             my_numbers.pop();
-            MPI_Send(&numberToSend, 1, MPI_FLOAT, 0, SEND_LEFTOVER_PROCCESS_NUMBER_TO_SUM_REDUCTION_PHASE, MPI_COMM_WORLD);
+            MPI_Send(&numberToSend, 1, MPI_FLOAT, 0, SendTag::SEND_LEFTOVER_PROCCESS_NUMBER_TO_SUM_REDUCTION_PHASE, MPI_COMM_WORLD);
         }else if(world_rank == 0){
-            receiveNumberAndPush(qtProccessWithNumbers - 1, my_numbers, SEND_LEFTOVER_PROCCESS_NUMBER_TO_SUM_REDUCTION_PHASE);
+            receiveNumberAndPush(qtProccessWithNumbers - 1, my_numbers, SendTag::SEND_LEFTOVER_PROCCESS_NUMBER_TO_SUM_REDUCTION_PHASE);
         }
     }
 }
 
 int main(int argc, char** argv){
+    std::chrono::duration<double, std::milli> totalTimeElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                                                                                std::chrono::milliseconds(0)
+                                                                                            );
 
-    auto initTime = std::chrono::high_resolution_clock::now();
+    
 
     MPI_Init(NULL, NULL);
 
@@ -578,26 +591,37 @@ int main(int argc, char** argv){
     MPI_Comm_rank(MPI_COMM_WORLD, &myWorldRank);
 
     std::stack<float> myNumbers;
-    int type = 0;
+    TypeFlag type;
     int totalNumbers = 0;
     int qtProccessWithNumbers = 0;
 
+    auto initTimeInputs = std::chrono::high_resolution_clock::now();
     getAllInputs(myWorldRank, worldCommSize, type, totalNumbers, myNumbers, qtProccessWithNumbers);
+    auto finalTimeInputs = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> totalTimeInputs = finalTimeInputs - initTimeInputs;
 
+    std::cout<<"Input time: "<<totalTimeInputs.count()<<std::endl;
+
+    auto initTime = std::chrono::high_resolution_clock::now();
     crossSumPhase(myWorldRank, myNumbers, worldCommSize, qtProccessWithNumbers, totalNumbers);
 
     reductionPhase(myWorldRank, myNumbers, qtProccessWithNumbers);
     
-    if(myWorldRank == 0){
+
+    if((TypeFlag::SUM == type ||  TypeFlag::ALL == type)  && myWorldRank == 0){
         std::cout<<"SOMA TOTAL: "<<myNumbers.top()<<std::endl;
     }
 
     MPI_Finalize();
 
     auto endTime = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double, std::milli> fp_ms = endTime - initTime;
-    auto timeExec = std::chrono::duration_cast<std::chrono::milliseconds>(fp_ms);
-    std::cout<<timeExec.count()<<std::endl;
+    //totalTimeElapsed = endTime - initTime - (totalTimeInputs);
+
+    if((TypeFlag::TIME == type ||  TypeFlag::ALL == type) && myWorldRank == 0){
+        totalTimeElapsed = endTime - initTime;
+        auto timeExec = std::chrono::duration_cast<std::chrono::milliseconds>(totalTimeElapsed);
+        std::cout<<timeExec.count()<<std::endl;
+    }
 
     return 0;
 }
