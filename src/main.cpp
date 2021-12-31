@@ -575,9 +575,37 @@ void sumStack(std::stack<float>& myNumbers){
     myNumbers.push(mySum);
 }
 
+/**
+ * @brief Gets the maximum time elapsed. Only proccess 0 will return its true value, all other proccesses will return 0.0
+ * 
+ * @param myWorldRank 
+ * @param myTotalTimeElapsed 
+ * @param qtProccessWithNumbers 
+ * @return float 
+ */
+float getMaximumTimeElapsed(const int myWorldRank, const float myTotalTimeElapsed, const int qtProccessWithNumbers){
+    float maximumTimeElapsedMili = 0.0;
+
+    if(myWorldRank == 0){
+        maximumTimeElapsedMili = myTotalTimeElapsed;
+        float timeReceived = 0.0;
+        for(unsigned int proccessCount = 1; proccessCount < qtProccessWithNumbers; proccessCount++){
+            MPI_Recv(&timeReceived, 1, MPI_FLOAT, MPI_ANY_SOURCE, SendTag::SEND_TIME_ELAPSED, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            if(timeReceived > maximumTimeElapsedMili){
+                maximumTimeElapsedMili = timeReceived;
+            }
+        }
+
+    }else if(myWorldRank < qtProccessWithNumbers){//If it is a proccess that had numbers assigned
+        float timeElapsedFloat = myTotalTimeElapsed;
+        MPI_Send(&timeElapsedFloat, 1, MPI_FLOAT, 0, SendTag::SEND_TIME_ELAPSED, MPI_COMM_WORLD);
+    }
+    return maximumTimeElapsedMili;
+}
+
 int main(int argc, char** argv){
 
-    std::chrono::duration<double, std::milli> totalTimeElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+    std::chrono::duration<double, std::milli> myTotalTimeElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                                                                                                 std::chrono::milliseconds(0)
                                                                                             );
 
@@ -598,49 +626,47 @@ int main(int argc, char** argv){
     //See that getMyNumbers() block partition the numbers as they are read. We dont read all numbers first and then partition.
     //In this way, the block partitioning time is not taken account.
     getAllInputs(myWorldRank, worldCommSize, type, totalNumbers, myNumbers, qtProccessWithNumbers);
-
     auto initTime = std::chrono::high_resolution_clock::now();
 
-    if(qtProccessWithNumbers == 1){//Only proccess 0 has numbers
+    if(qtProccessWithNumbers != 0){
+
+        if(qtProccessWithNumbers == 1){//Only proccess 0 has numbers
         
-        //There may be other proccesses that just didn't get any numbers, so we check for proccess 0
-        if(myWorldRank == 0){
-            sumStack(myNumbers);
+            //There may be other proccesses that just didn't get any numbers, so we check for proccess 0
+            if(myWorldRank == 0){
+                sumStack(myNumbers);
+            }
+
+        }else if(qtProccessWithNumbers > 1){
+
+            crossSumPhase(myWorldRank, myNumbers, worldCommSize, qtProccessWithNumbers, totalNumbers);
+            reductionPhase(myWorldRank, myNumbers, qtProccessWithNumbers);
+
         }
-
-    }else{
-
-        crossSumPhase(myWorldRank, myNumbers, worldCommSize, qtProccessWithNumbers, totalNumbers);
-        reductionPhase(myWorldRank, myNumbers, qtProccessWithNumbers);
-
     }
-    
+        
     auto endTime = std::chrono::high_resolution_clock::now();
 
     if((TypeFlag::SUM == type ||  TypeFlag::ALL == type)  && myWorldRank == 0){
-        std::cout<<myNumbers.top()<<std::endl;
+        if(myNumbers.size() > 0){
+            std::cout<<myNumbers.top()<<std::endl;
+        }else{
+            std::cout<<"0\n";
+        }
+        
     }
 
     if(TypeFlag::TIME == type ||  TypeFlag::ALL == type){
-        totalTimeElapsed = endTime - initTime;
-        auto timeExec = std::chrono::duration_cast<std::chrono::milliseconds>(totalTimeElapsed);
 
+        myTotalTimeElapsed = endTime - initTime;
+
+        float maximumTimeElapsedMili = getMaximumTimeElapsed(myWorldRank, (float) myTotalTimeElapsed.count(), qtProccessWithNumbers);
         if(myWorldRank == 0){
-            float minimumTimeElapsedMili = (float) totalTimeElapsed.count();
-            float timeReceived = 0.0;
-            for(unsigned int proccessCount = 1; proccessCount < qtProccessWithNumbers; proccessCount++){
-                MPI_Recv(&timeReceived, 1, MPI_FLOAT, MPI_ANY_SOURCE, SendTag::SEND_TIME_ELAPSED, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                if(timeReceived > minimumTimeElapsedMili){
-                    minimumTimeElapsedMili = timeReceived;
-                }
-            }
-
-            std::cout<<minimumTimeElapsedMili<<std::endl;
-        }else if(myWorldRank < qtProccessWithNumbers){//If it is a proccess that had numbers assigned
-            float timeElapsedFloat = (float) totalTimeElapsed.count();
-            MPI_Send(&timeElapsedFloat, 1, MPI_FLOAT, 0, SendTag::SEND_TIME_ELAPSED, MPI_COMM_WORLD);
+            std::cout<<maximumTimeElapsedMili<<std::endl;
         }
+        
     }
+    
 
     MPI_Finalize();
 
