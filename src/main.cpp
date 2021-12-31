@@ -16,7 +16,8 @@ enum SendTag {
     SEND_NUMBER_TO_SUM_TO_PAIR_PROCCESS,
     SEND_LEFTOVER_PROCCESS_NUMBER_TO_SUM,
     SEND_NUMBER_TO_SUM_TO_PAIR_PROCCESS_REDUCTION_PHASE,
-    SEND_LEFTOVER_PROCCESS_NUMBER_TO_SUM_REDUCTION_PHASE
+    SEND_LEFTOVER_PROCCESS_NUMBER_TO_SUM_REDUCTION_PHASE,
+    SEND_TIME_ELAPSED
 };
 
 enum TypeFlag{
@@ -55,8 +56,8 @@ void getType(const unsigned int myRank, const unsigned int comm_sz, TypeFlag& ty
 }
 
 /**
- * @brief  Get the quantity of numbers from the user and calculates how many numbers each proccess
- *  will get via block partitioning and send it to each proccess
+ * @brief  Get the quantity of numbers from the user, calculates how many numbers each proccess
+ *  will get via block partitioning and send that number to each proccess
  * 
  * @param myRank in
  * @param comm_sz in
@@ -71,7 +72,6 @@ unsigned int getNumbersExpectedCount(const unsigned int myRank, const unsigned i
     if(myRank == 0){
 
         std::cin>>totalNumbers;
-        std::cout<<"Quantity of numbers : "<<totalNumbers<<std::endl;
         
         //Send totalNumbers to every proccess
         for(int rankProccess = 1; rankProccess < comm_sz; rankProccess++){
@@ -81,8 +81,6 @@ unsigned int getNumbersExpectedCount(const unsigned int myRank, const unsigned i
         //There are more proccesses than numbers
         if(totalNumbers < comm_sz){
             qtProccessWithNumbers = totalNumbers;
-
-            //std::cout<<" There are more proccesses than numbers!\n";
                             
             //Set each proccess with one number until it reaches the necessary amount.
             //Set 0 numbers for proccesses if needed
@@ -105,12 +103,8 @@ unsigned int getNumbersExpectedCount(const unsigned int myRank, const unsigned i
                 qtNumbersProccesses[proccess] = minimunNumbersPerProccess;
             }
 
-            //std::cout<<"Numbers per Proccess: "<<minimunNumbersPerProccess<<std::endl;
-
             bool everyProccessGetSameAmountNumbers = minimunNumbersPerProccess * comm_sz == totalNumbers;
             if(!everyProccessGetSameAmountNumbers){//There will be proccesses with more numbers than others
-
-                //std::cout<<"Every Proccess will get at least "<<minimunNumbersPerProccess<<" numbers!\n";
 
                 //Add one number count to each proccess until all leftovers were assigned
                 int qtLeftOverNumbers = totalNumbers - minimunNumbersPerProccess * comm_sz;
@@ -129,8 +123,6 @@ unsigned int getNumbersExpectedCount(const unsigned int myRank, const unsigned i
             } /* !everyProccessGetSameAmountNumbers*/
 
         }
-
-        //std::cout<<"Quantity of proccesses with numbers: "<<qtProccessWithNumbers<<std::endl;
         
         //Send to every proccess the amount of proccesses that have numbers assigned
         for (int proccessRank = 1; proccessRank< comm_sz; proccessRank++){
@@ -226,7 +218,6 @@ void getMyNumbers(const unsigned int myRank, const unsigned int comm_sz, const i
 void getAllInputs(const unsigned int myRank, const unsigned int comm_sz, TypeFlag& type, int& totalNumbers,
                      std::stack<float>& myNumbers, int& qtProccessWithNumbers){
     
-    //if there are more proccesses than numbers
     getType(myRank, comm_sz, type);
     unsigned int qtNumbersProccesses[comm_sz];
     unsigned int amountNumbersExpected = getNumbersExpectedCount(myRank, comm_sz, totalNumbers, qtNumbersProccesses, qtProccessWithNumbers);
@@ -245,12 +236,12 @@ void getAllInputs(const unsigned int myRank, const unsigned int comm_sz, TypeFla
  * @return false 
  */
 bool willHaveAPairProccess(const int my_rank, const int comm_sz, const int numberOfProccessesTakenAcount){
-    //if there is a pair amount of proccesses
+    //if there is an even amount of proccesses
     if(numberOfProccessesTakenAcount % 2 == 0){
         return true;
     }
-    //there are odd number of proccesses
-    
+
+    //there are an odd number of proccesses
 
     //if it is not the last proccess (as it cant have a pair proccess)
     if(my_rank != numberOfProccessesTakenAcount - 1){
@@ -506,7 +497,6 @@ void crossSumPhase(const int world_rank,  std::stack<float>& my_numbers, const i
             
         }else{
             //Its a leftover proccess. A proccess without a pair proccess
-
             bool shouldSendToOtherProccesses = my_numbers.size() > 1;
             if(shouldSendToOtherProccesses){
                 sendLeftOverNumberCrossSumPhase(my_numbers, qtProccessWithNumbers);
@@ -527,20 +517,12 @@ void crossSumPhase(const int world_rank,  std::stack<float>& my_numbers, const i
 void reductionPhase(const int world_rank, std::stack<float>& my_numbers, const int qtProccessWithNumbers){
     unsigned int numPhases = (int) log2(qtProccessWithNumbers);
 
-    if(world_rank == 0){
-        std::cout<<"qtProccessWithNumbers: "<<qtProccessWithNumbers<<std::endl;
-        std::cout<<"Num fases: "<<numPhases<<std::endl;
-    }
-
     unsigned int qtProccessThisPhase = pow(2, numPhases);
     bool thereIsALeftOverProccess = pow(2, numPhases) != qtProccessWithNumbers;
     unsigned int lastProccessRank = qtProccessWithNumbers - 1;
 
     if(!thereIsALeftOverProccess || (thereIsALeftOverProccess && world_rank != lastProccessRank)){
         for(unsigned int thisPhase = 1; thisPhase <= numPhases; thisPhase ++){
-            if(world_rank == 0){
-                std::cout<<"Fase de redução: "<<thisPhase<<std::endl;
-            }
 
             //As qtProccessThisPhase is a power of two, this division will always be an integer
             unsigned int halfCountProccessesThisPhase = qtProccessThisPhase/2;
@@ -575,12 +557,29 @@ void reductionPhase(const int world_rank, std::stack<float>& my_numbers, const i
     }
 }
 
+/**
+ * @brief Sum the numbers in the stack and push it to the stack. The stack will only have one number: it's sum.
+ * 
+ * @param myNumbers 
+ */
+void sumStack(std::stack<float>& myNumbers){
+    float mySum = 0.0;
+
+    unsigned int amountNumbersToSum = myNumbers.size();
+
+    for(unsigned int numberToSum = 0; numberToSum < amountNumbersToSum; numberToSum ++){
+        mySum += myNumbers.top();
+        myNumbers.pop();
+    }
+
+    myNumbers.push(mySum);
+}
+
 int main(int argc, char** argv){
+
     std::chrono::duration<double, std::milli> totalTimeElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                                                                                                 std::chrono::milliseconds(0)
                                                                                             );
-
-    
 
     MPI_Init(NULL, NULL);
 
@@ -595,33 +594,55 @@ int main(int argc, char** argv){
     int totalNumbers = 0;
     int qtProccessWithNumbers = 0;
 
-    auto initTimeInputs = std::chrono::high_resolution_clock::now();
+    //As getting inputs is mainly dependent on the user input, its time is not taken account in total time.
+    //See that getMyNumbers() block partition the numbers as they are read. We dont read all numbers first and then partition.
+    //In this way, the block partitioning time is not taken account.
     getAllInputs(myWorldRank, worldCommSize, type, totalNumbers, myNumbers, qtProccessWithNumbers);
-    auto finalTimeInputs = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double, std::milli> totalTimeInputs = finalTimeInputs - initTimeInputs;
-
-    std::cout<<"Input time: "<<totalTimeInputs.count()<<std::endl;
 
     auto initTime = std::chrono::high_resolution_clock::now();
-    crossSumPhase(myWorldRank, myNumbers, worldCommSize, qtProccessWithNumbers, totalNumbers);
 
-    reductionPhase(myWorldRank, myNumbers, qtProccessWithNumbers);
+    if(qtProccessWithNumbers == 1){//Only proccess 0 has numbers
+        
+        //There may be other proccesses that just didn't get any numbers, so we check for proccess 0
+        if(myWorldRank == 0){
+            sumStack(myNumbers);
+        }
+
+    }else{
+
+        crossSumPhase(myWorldRank, myNumbers, worldCommSize, qtProccessWithNumbers, totalNumbers);
+        reductionPhase(myWorldRank, myNumbers, qtProccessWithNumbers);
+
+    }
     
+    auto endTime = std::chrono::high_resolution_clock::now();
 
     if((TypeFlag::SUM == type ||  TypeFlag::ALL == type)  && myWorldRank == 0){
-        std::cout<<"SOMA TOTAL: "<<myNumbers.top()<<std::endl;
+        std::cout<<myNumbers.top()<<std::endl;
+    }
+
+    if(TypeFlag::TIME == type ||  TypeFlag::ALL == type){
+        totalTimeElapsed = endTime - initTime;
+        auto timeExec = std::chrono::duration_cast<std::chrono::milliseconds>(totalTimeElapsed);
+
+        if(myWorldRank == 0){
+            float minimumTimeElapsedMili = (float) totalTimeElapsed.count();
+            float timeReceived = 0.0;
+            for(unsigned int proccessCount = 1; proccessCount < qtProccessWithNumbers; proccessCount++){
+                MPI_Recv(&timeReceived, 1, MPI_FLOAT, MPI_ANY_SOURCE, SendTag::SEND_TIME_ELAPSED, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                if(timeReceived > minimumTimeElapsedMili){
+                    minimumTimeElapsedMili = timeReceived;
+                }
+            }
+
+            std::cout<<minimumTimeElapsedMili<<std::endl;
+        }else if(myWorldRank < qtProccessWithNumbers){//If it is a proccess that had numbers assigned
+            float timeElapsedFloat = (float) totalTimeElapsed.count();
+            MPI_Send(&timeElapsedFloat, 1, MPI_FLOAT, 0, SendTag::SEND_TIME_ELAPSED, MPI_COMM_WORLD);
+        }
     }
 
     MPI_Finalize();
-
-    auto endTime = std::chrono::high_resolution_clock::now();
-    //totalTimeElapsed = endTime - initTime - (totalTimeInputs);
-
-    if((TypeFlag::TIME == type ||  TypeFlag::ALL == type) && myWorldRank == 0){
-        totalTimeElapsed = endTime - initTime;
-        auto timeExec = std::chrono::duration_cast<std::chrono::milliseconds>(totalTimeElapsed);
-        std::cout<<timeExec.count()<<std::endl;
-    }
 
     return 0;
 }
