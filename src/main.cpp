@@ -548,10 +548,8 @@ void reductionPhase(const int world_rank, std::stack<float>& my_numbers, const i
     
     if(thereIsALeftOverProccess){
         if(world_rank == lastProccessRank){
-            float numberToSend = my_numbers.top();
-            my_numbers.pop();
-            MPI_Send(&numberToSend, 1, MPI_FLOAT, 0, SendTag::SEND_LEFTOVER_PROCCESS_NUMBER_TO_SUM_REDUCTION_PHASE, MPI_COMM_WORLD);
-        }else if(world_rank == 0){
+            popNumberAndSend(0, my_numbers, SendTag::SEND_LEFTOVER_PROCCESS_NUMBER_TO_SUM_REDUCTION_PHASE);
+           }else if(world_rank == 0){
             receiveNumberAndPush(qtProccessWithNumbers - 1, my_numbers, SendTag::SEND_LEFTOVER_PROCCESS_NUMBER_TO_SUM_REDUCTION_PHASE);
         }
     }
@@ -649,7 +647,7 @@ int main(int argc, char** argv){
 
     if((TypeFlag::SUM == type ||  TypeFlag::ALL == type)  && myWorldRank == 0){
         if(myNumbers.size() > 0){
-            std::cout<<myNumbers.top()<<std::endl;
+            std::cout<<(float) myNumbers.top()<<std::endl;
         }else{
             std::cout<<"0\n";
         }
