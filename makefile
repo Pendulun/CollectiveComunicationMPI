@@ -13,7 +13,7 @@ $(BUILD)main.o: $(SRC)main.cpp
 	${MPICC} -c $(SRC)main.cpp -o $(BUILD)main.o
 
 run: ${EXECS}
-	mpiexec -n 5 ./${EXECS}
+	mpiexec -n 4 ./${EXECS}
 
 clean:
 	rm ${EXECS} -f $(BUILD)*/*.o $(BUILD)*.o
