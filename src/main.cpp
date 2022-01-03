@@ -507,52 +507,56 @@ void crossSumPhase(const int world_rank,  std::stack<float>& my_numbers, const i
 }
 
 /**
- * @brief This is the reduction phase. If qtProccessWithNumbers is even, it has log2(qtProccessWithNumbers) iterations. 
- * If qtProccessWithNumbers is odd, it has log2(qtProccessWithNumbers)+1 phase.
+ * @brief This is the reduction phase. If qtProcessWithNumbers is even, it has log2(qtProcessWithNumbers) iterations. 
+ * If qtProcessWithNumbers is odd, it has log2(qtProcessWithNumbers)+1 phase.
  * In the end, the proccess's queue with rank equal to 0 will contain the final result.
  * @param world_rank 
  * @param my_numbers 
- * @param qtProccessWithNumbers 
+ * @param qtProcessWithNumbers 
  */
-void reductionPhase(const int world_rank, std::stack<float>& my_numbers, const int qtProccessWithNumbers){
-    unsigned int numPhases = (int) log2(qtProccessWithNumbers);
+void reductionPhase(const int world_rank, std::stack<float>& my_numbers, const int qtProcessWithNumbers){
+    unsigned int numPhases = (int) log2(qtProcessWithNumbers);
 
-    unsigned int qtProccessThisPhase = pow(2, numPhases);
-    bool thereIsALeftOverProccess = pow(2, numPhases) != qtProccessWithNumbers;
-    unsigned int lastProccessRank = qtProccessWithNumbers - 1;
+    unsigned int qtProcessThisPhase = pow(2, numPhases);
+    unsigned int qtLeftOverProccessess = qtProcessWithNumbers - qtProcessThisPhase;
 
-    if(!thereIsALeftOverProccess || (thereIsALeftOverProccess && world_rank != lastProccessRank)){
+    //If this is isnt a leftover process
+    if(world_rank < qtProcessWithNumbers - qtLeftOverProccessess){
         for(unsigned int thisPhase = 1; thisPhase <= numPhases; thisPhase ++){
 
-            //As qtProccessThisPhase is a power of two, this division will always be an integer
-            unsigned int halfCountProccessesThisPhase = qtProccessThisPhase/2;
+            //As qtProcessThisPhase is a power of two, this division will always be an integer
+            unsigned int halfCountProcessesThisPhase = qtProcessThisPhase/2;
 
-            if(world_rank < halfCountProccessesThisPhase){
+            if(world_rank < halfCountProcessesThisPhase){
                 //This proccess is a destiny proccess
-                int rankProccessThatWillSendNumber = world_rank + halfCountProccessesThisPhase;
+                int rankProccessThatWillSendNumber = world_rank + halfCountProcessesThisPhase;
                 receiveNumberAndPush(rankProccessThatWillSendNumber, my_numbers, SendTag::SEND_NUMBER_TO_SUM_TO_PAIR_PROCCESS_REDUCTION_PHASE);
             }else{
                 //This proccess it's an origin proccess
                 
-                int rankProccessToSendNumber = world_rank - halfCountProccessesThisPhase;
-                popNumberAndSend(rankProccessToSendNumber, my_numbers, SendTag::SEND_NUMBER_TO_SUM_TO_PAIR_PROCCESS_REDUCTION_PHASE);
+                int rankProcessToSendNumber = world_rank - halfCountProcessesThisPhase;
+                popNumberAndSend(rankProcessToSendNumber, my_numbers, SendTag::SEND_NUMBER_TO_SUM_TO_PAIR_PROCCESS_REDUCTION_PHASE);
                 
                 //This proccess will not be in any other phase
                 break;
             }
-            qtProccessThisPhase = qtProccessThisPhase/2;
+            qtProcessThisPhase = qtProcessThisPhase/2;
         }
     }
 
-    //At this point, only proccess 0 and leftOverProccess (if there is one) will have a number in its queue.
+    //At this point, only proccess 0 and all leftover processes (if there is one) will have a number in its queue.
     
-    if(thereIsALeftOverProccess){
-        if(world_rank == lastProccessRank){
+    if(qtLeftOverProccessess > 0){
+        //If this is a leftover process
+        if(world_rank >=  qtProcessWithNumbers - qtLeftOverProccessess){
             popNumberAndSend(0, my_numbers, SendTag::SEND_LEFTOVER_PROCCESS_NUMBER_TO_SUM_REDUCTION_PHASE);
-           }else if(world_rank == 0){
-            receiveNumberAndPush(qtProccessWithNumbers - 1, my_numbers, SendTag::SEND_LEFTOVER_PROCCESS_NUMBER_TO_SUM_REDUCTION_PHASE);
+        }else if(world_rank == 0){ // Receive all leftover numbers
+            for(unsigned int leftOverCount = 0; leftOverCount < qtLeftOverProccessess; leftOverCount++){
+                receiveNumberAndPush(MPI_ANY_SOURCE, my_numbers, SendTag::SEND_LEFTOVER_PROCCESS_NUMBER_TO_SUM_REDUCTION_PHASE);
+            }
         }
     }
+    
 }
 
 /**
